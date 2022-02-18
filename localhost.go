@@ -2,15 +2,14 @@ package sup
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"io"
 	"os"
 	"os/exec"
 	"os/user"
-
-	"github.com/pkg/errors"
 )
 
-// Client is a wrapper over the SSH connection/sessions.
+// LocalhostClient is a wrapper over the SSH connection/sessions.
 type LocalhostClient struct {
 	cmd     *exec.Cmd
 	user    string
@@ -21,56 +20,51 @@ type LocalhostClient struct {
 	env     string //export FOO="bar"; export BAR="baz";
 }
 
-func (c *LocalhostClient) Connect(_ string) error {
-	u, err := user.Current()
-	if err != nil {
-		return err
+func (c *LocalhostClient) Connect() (err error) {
+	var u *user.User
+	if u, err = user.Current(); err != nil {
+		return
 	}
 
 	c.user = u.Username
-	return nil
+	return
 }
 
-func (c *LocalhostClient) Run(task *Task) error {
-	var err error
-
+func (c *LocalhostClient) Run(task *Task) (err error) {
 	if c.running {
-		return fmt.Errorf("Command already running")
+		return fmt.Errorf("Command already running. ")
 	}
 
 	cmd := exec.Command("bash", "-c", c.env+task.Run)
 	c.cmd = cmd
 
-	c.stdout, err = cmd.StdoutPipe()
-	if err != nil {
-		return err
+	if c.stdout, err = cmd.StdoutPipe(); err != nil {
+		return
 	}
 
-	c.stderr, err = cmd.StderrPipe()
-	if err != nil {
-		return err
+	if c.stderr, err = cmd.StderrPipe(); err != nil {
+		return
 	}
 
-	c.stdin, err = cmd.StdinPipe()
-	if err != nil {
-		return err
+	if c.stdin, err = cmd.StdinPipe(); err != nil {
+		return
 	}
 
-	if err := c.cmd.Start(); err != nil {
+	if err = c.cmd.Start(); err != nil {
 		return ErrTask{task, err.Error()}
 	}
 
 	c.running = true
-	return nil
+	return
 }
 
-func (c *LocalhostClient) Wait() error {
+func (c *LocalhostClient) Wait() (err error) {
 	if !c.running {
-		return fmt.Errorf("Trying to wait on stopped command")
+		return fmt.Errorf("Trying to wait on stopped command. ")
 	}
-	err := c.cmd.Wait()
+	err = c.cmd.Wait()
 	c.running = false
-	return err
+	return
 }
 
 func (c *LocalhostClient) Close() error {

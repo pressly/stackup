@@ -12,9 +12,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/NovikovRoman/sup"
 	"github.com/mikkeloscar/sshconfig"
 	"github.com/pkg/errors"
-	"github.com/pressly/sup"
 )
 
 var (
@@ -30,12 +30,10 @@ var (
 	showVersion bool
 	showHelp    bool
 
-	ErrUsage            = errors.New("Usage: sup [OPTIONS] NETWORK COMMAND [...]\n       sup [ --help | -v | --version ]")
-	ErrUnknownNetwork   = errors.New("Unknown network")
-	ErrNetworkNoHosts   = errors.New("No hosts defined for a given network")
-	ErrCmd              = errors.New("Unknown command/target")
-	ErrTargetNoCommands = errors.New("No commands defined for a given target")
-	ErrConfigFile       = errors.New("Unknown ssh_config file")
+	ErrUsage          = errors.New("Usage: sup [OPTIONS] NETWORK COMMAND [...]\n       sup [ --help | -v | --version ]")
+	ErrUnknownNetwork = errors.New("Unknown network")
+	ErrNetworkNoHosts = errors.New("No hosts defined for a given network")
+	ErrCmd            = errors.New("Unknown command/target")
 )
 
 type flagStringSlice []string
@@ -70,44 +68,51 @@ func init() {
 func networkUsage(conf *sup.Supfile) {
 	w := &tabwriter.Writer{}
 	w.Init(os.Stderr, 4, 4, 2, ' ', 0)
-	defer w.Flush()
+	defer func(w *tabwriter.Writer) {
+		_ = w.Flush()
+	}(w)
 
 	// Print available networks/hosts.
-	fmt.Fprintln(w, "Networks:\t")
+	_, _ = fmt.Fprintln(w, "Networks:\t")
 	for _, name := range conf.Networks.Names {
-		fmt.Fprintf(w, "- %v\n", name)
+		_, _ = fmt.Fprintf(w, "- %v\n", name)
 		network, _ := conf.Networks.Get(name)
 		for _, host := range network.Hosts {
-			fmt.Fprintf(w, "\t- %v\n", host)
+			_, _ = fmt.Fprintf(w, "\t- %v\n", host)
 		}
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 }
 
 func cmdUsage(conf *sup.Supfile) {
 	w := &tabwriter.Writer{}
 	w.Init(os.Stderr, 4, 4, 2, ' ', 0)
-	defer w.Flush()
+	defer func(w *tabwriter.Writer) {
+		_ = w.Flush()
+	}(w)
 
 	// Print available targets/commands.
-	fmt.Fprintln(w, "Targets:\t")
+	_, _ = fmt.Fprintln(w, "Targets:\t")
 	for _, name := range conf.Targets.Names {
 		cmds, _ := conf.Targets.Get(name)
-		fmt.Fprintf(w, "- %v\t%v\n", name, strings.Join(cmds, " "))
+		_, _ = fmt.Fprintf(w, "- %v\t%v\n", name, strings.Join(cmds, " "))
 	}
-	fmt.Fprintln(w, "\t")
-	fmt.Fprintln(w, "Commands:\t")
+	_, _ = fmt.Fprintln(w, "\t")
+	_, _ = fmt.Fprintln(w, "Commands:\t")
 	for _, name := range conf.Commands.Names {
 		cmd, _ := conf.Commands.Get(name)
-		fmt.Fprintf(w, "- %v\t%v\n", name, cmd.Desc)
+		_, _ = fmt.Fprintf(w, "- %v\t%v\n", name, cmd.Desc)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 }
 
 // parseArgs parses args and returns network and commands to be run.
 // On error, it prints usage and exits.
-func parseArgs(conf *sup.Supfile) (*sup.Network, []*sup.Command, error) {
-	var commands []*sup.Command
+func parseArgs(conf *sup.Supfile) (network *sup.Network, commands []*sup.Command, err error) {
+	var (
+		ok bool
+		nw sup.Network
+	)
 
 	args := flag.Args()
 	if len(args) < 1 {
@@ -116,11 +121,14 @@ func parseArgs(conf *sup.Supfile) (*sup.Network, []*sup.Command, error) {
 	}
 
 	// Does the <network> exist?
-	network, ok := conf.Networks.Get(args[0])
+	nw, ok = conf.Networks.Get(args[0])
 	if !ok {
 		networkUsage(conf)
-		return nil, nil, ErrUnknownNetwork
+		err = ErrUnknownNetwork
+		return
 	}
+
+	network = &nw
 
 	// Parse CLI --env flag env vars, override values defined in Network env.
 	for _, env := range envVars {
@@ -137,22 +145,25 @@ func parseArgs(conf *sup.Supfile) (*sup.Network, []*sup.Command, error) {
 		network.Env.Set(env[:i], env[i+1:])
 	}
 
-	hosts, err := network.ParseInventory()
-	if err != nil {
-		return nil, nil, err
+	// Inventory
+	var hosts []string
+	if hosts, err = network.ParseInventory(); err != nil {
+		return
 	}
 	network.Hosts = append(network.Hosts, hosts...)
 
 	// Does the <network> have at least one host?
 	if len(network.Hosts) == 0 {
 		networkUsage(conf)
-		return nil, nil, ErrNetworkNoHosts
+		err = ErrNetworkNoHosts
+		return
 	}
 
 	// Check for the second argument
 	if len(args) < 2 {
 		cmdUsage(conf)
-		return nil, nil, ErrUsage
+		err = ErrUsage
+		return
 	}
 
 	// In case of the network.Env needs an initialization
@@ -181,13 +192,14 @@ func parseArgs(conf *sup.Supfile) (*sup.Network, []*sup.Command, error) {
 		target, isTarget := conf.Targets.Get(cmd)
 		if isTarget {
 			// Loop over target's commands.
-			for _, cmd := range target {
-				command, isCommand := conf.Commands.Get(cmd)
+			for _, cmdTarget := range target {
+				command, isCommand := conf.Commands.Get(cmdTarget)
 				if !isCommand {
 					cmdUsage(conf)
-					return nil, nil, fmt.Errorf("%v: %v", ErrCmd, cmd)
+					err = fmt.Errorf("%v: %v", ErrCmd, cmdTarget)
+					return
 				}
-				command.Name = cmd
+				command.Name = cmdTarget
 				commands = append(commands, &command)
 			}
 		}
@@ -205,7 +217,7 @@ func parseArgs(conf *sup.Supfile) (*sup.Network, []*sup.Command, error) {
 		}
 	}
 
-	return &network, commands, nil
+	return
 }
 
 func resolvePath(path string) string {
@@ -222,50 +234,59 @@ func resolvePath(path string) string {
 }
 
 func main() {
+	var (
+		conf     *sup.Supfile
+		commands []*sup.Command
+		network  *sup.Network
+		data     []byte
+		err      error
+	)
 	flag.Parse()
 
 	if showHelp {
-		fmt.Fprintln(os.Stderr, ErrUsage, "\n\nOptions:")
+		_, _ = fmt.Fprintln(os.Stderr, ErrUsage, "\n\nOptions:")
 		flag.PrintDefaults()
 		return
 	}
 
 	if showVersion {
-		fmt.Fprintln(os.Stderr, sup.VERSION)
+		_, _ = fmt.Fprintln(os.Stderr, sup.VERSION)
 		return
 	}
 
 	if supfile == "" {
 		supfile = "./Supfile"
 	}
-	data, err := ioutil.ReadFile(resolvePath(supfile))
-	if err != nil {
+
+	if data, err = ioutil.ReadFile(resolvePath(supfile)); err != nil {
 		firstErr := err
 		data, err = ioutil.ReadFile("./Supfile.yml") // Alternative to ./Supfile.
 		if err != nil {
-			fmt.Fprintln(os.Stderr, firstErr)
-			fmt.Fprintln(os.Stderr, err)
+			_, _ = fmt.Fprintln(os.Stderr, firstErr)
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	}
-	conf, err := sup.NewSupfile(data)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+
+	if conf, err = sup.NewSupfile(data); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	// Parse network and commands to be run from args.
-	network, commands, err := parseArgs(conf)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if network, commands, err = parseArgs(conf); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
+	var (
+		expr *regexp.Regexp
+	)
+
 	// --only flag filters hosts
 	if onlyHosts != "" {
-		expr, err := regexp.CompilePOSIX(onlyHosts)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if expr, err = regexp.CompilePOSIX(onlyHosts); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 
@@ -276,7 +297,7 @@ func main() {
 			}
 		}
 		if len(hosts) == 0 {
-			fmt.Fprintln(os.Stderr, fmt.Errorf("no hosts match --only '%v' regexp", onlyHosts))
+			_, _ = fmt.Fprintln(os.Stderr, fmt.Errorf("no hosts match --only '%v' regexp", onlyHosts))
 			os.Exit(1)
 		}
 		network.Hosts = hosts
@@ -284,9 +305,8 @@ func main() {
 
 	// --except flag filters out hosts
 	if exceptHosts != "" {
-		expr, err := regexp.CompilePOSIX(exceptHosts)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if expr, err = regexp.CompilePOSIX(exceptHosts); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 
@@ -296,47 +316,31 @@ func main() {
 				hosts = append(hosts, host)
 			}
 		}
+
 		if len(hosts) == 0 {
-			fmt.Fprintln(os.Stderr, fmt.Errorf("no hosts left after --except '%v' regexp", onlyHosts))
+			_, _ = fmt.Fprintln(os.Stderr, fmt.Errorf("no hosts left after --except '%v' regexp", onlyHosts))
 			os.Exit(1)
 		}
 		network.Hosts = hosts
 	}
 
 	// --sshconfig flag location for ssh_config file
-	if sshConfig != "" {
-		confHosts, err := sshconfig.ParseSSHConfig(resolvePath(sshConfig))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+	if sshConfig == "" {
+		sshConfig = filepath.Join(os.Getenv("HOME"), ".ssh", "config")
+	}
 
-		// flatten Host -> *SSHHost, not the prettiest
-		// but will do
-		confMap := map[string]*sshconfig.SSHHost{}
-		for _, conf := range confHosts {
-			for _, host := range conf.Host {
-				confMap[host] = conf
-			}
-		}
-
-		// check network.Hosts for match
-		for _, host := range network.Hosts {
-			conf, found := confMap[host]
-			if found {
-				network.User = conf.User
-				network.IdentityFile = resolvePath(conf.IdentityFile)
-				network.Hosts = []string{fmt.Sprintf("%s:%d", conf.HostName, conf.Port)}
-			}
-		}
+	var sshConfigHosts []*sshconfig.SSHHost
+	if sshConfigHosts, err = sshconfig.Parse(resolvePath(sshConfig)); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	var vars sup.EnvList
 	for _, val := range append(conf.Env, network.Env...) {
 		vars.Set(val.Key, val.Value)
 	}
-	if err := vars.ResolveValues(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if err = vars.ResolveValues(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
@@ -368,16 +372,16 @@ func main() {
 	// Create new Stackup app.
 	app, err := sup.New(conf)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	app.Debug(debug)
 	app.Prefix(!disablePrefix)
 
 	// Run all the commands in the given network.
-	err = app.Run(network, vars, commands...)
+	err = app.Run(sshConfigHosts, network, vars, commands...)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
