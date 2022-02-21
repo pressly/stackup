@@ -254,18 +254,33 @@ func main() {
 		return
 	}
 
-	if supfile == "" {
-		supfile = "./Supfile"
+	var (
+		supfileVariants []string
+		firstErr        error
+	)
+	if supfile != "" {
+		supfileVariants = append(supfileVariants, supfile)
 	}
 
-	if data, err = ioutil.ReadFile(resolvePath(supfile)); err != nil {
-		firstErr := err
-		data, err = ioutil.ReadFile("./Supfile.yml") // Alternative to ./Supfile.
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, firstErr)
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+	// alternatives
+	supfileVariants = append(supfileVariants, []string{"./Supfile", "./Supfile.yml", "./Supfile.yaml"}...)
+
+	for i, fn := range supfileVariants {
+		if data, err = ioutil.ReadFile(resolvePath(fn)); err == nil {
+			break
 		}
+
+		if i == 0 {
+			firstErr = err
+		}
+	}
+
+	if err != nil {
+		if supfile != "" {
+			_, _ = fmt.Fprintln(os.Stderr, firstErr)
+		}
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	if conf, err = sup.NewSupfile(data); err != nil {
