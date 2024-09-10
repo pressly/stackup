@@ -1,4 +1,4 @@
-module github.com/NovikovRoman/sup
+module github.com/AlexMikhalev/sup
 
 go 1.17
 
