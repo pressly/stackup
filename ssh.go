@@ -2,11 +2,6 @@ package sup
 
 import (
 	"fmt"
-	"github.com/hashicorp/go-multierror"
-	"github.com/mikkeloscar/sshconfig"
-	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"io"
 	"io/ioutil"
 	"net"
@@ -15,6 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/hashicorp/go-multierror"
+	"github.com/mikkeloscar/sshconfig"
+	"github.com/pkg/errors"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // SSHClient is a wrapper over the SSH connection/sessions.
@@ -326,16 +327,17 @@ func (c *SSHClient) parseHost(host string) (err error) {
 		c.user = u.Username
 	}
 
-	if strings.Index(host, "/") != -1 {
+	if strings.Contains(host, "/") {
 		err = ErrConnect{User: c.user, Host: host, Reason: "unexpected slash in the host URL"}
 		return
 	}
 
 	// Add default port, if not set
-	if at := strings.LastIndex(host, ":"); at != -1 {
-		c.host += ":22"
+	if !strings.Contains(host, ":") {
+		host += ":22"
 	}
 
+	c.host = host
 	return
 }
 
