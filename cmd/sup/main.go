@@ -12,7 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/NovikovRoman/sup"
+	"github.com/AlexMikhalev/sup"
 	"github.com/mikkeloscar/sshconfig"
 	"github.com/pkg/errors"
 )
