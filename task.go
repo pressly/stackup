@@ -2,10 +2,6 @@ package sup
 
 import (
 	"fmt"
-	"github.com/goware/prefixer"
-	"github.com/hashicorp/go-multierror"
-	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
 	"log"
@@ -14,6 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/goware/prefixer"
+	"github.com/hashicorp/go-multierror"
+	"github.com/pkg/errors"
+	"golang.org/x/crypto/ssh"
 )
 
 // Task represents a set of commands to be run.
@@ -136,7 +137,10 @@ func (sup *Stackup) createTasks(cmd *Command, clients []Client, env string) (tas
 			env: env + `export SUP_HOST="localhost";`,
 		}
 
-		_ = local.Connect()
+		if err = local.Connect(); err != nil {
+			return nil, errors.Wrap(err, "connecting to localhost failed")
+		}
+
 		task := &Task{
 			Run:     cmd.Local,
 			Clients: []Client{local},
@@ -193,6 +197,7 @@ func (sup *Stackup) createTasks(cmd *Command, clients []Client, env string) (tas
 
 	return
 }
+
 func (t *Task) formatClientPrefix(c Client, len int) string {
 	p, _ := c.Prefix()
 	return fmt.Sprintf("%"+strconv.Itoa(len)+"s", p)

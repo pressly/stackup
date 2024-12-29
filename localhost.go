@@ -2,11 +2,13 @@ package sup
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
 	"os"
 	"os/exec"
 	"os/user"
+	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // LocalhostClient is a wrapper over the SSH connection/sessions.
@@ -32,39 +34,60 @@ func (c *LocalhostClient) Connect() (err error) {
 
 func (c *LocalhostClient) Run(task *Task) (err error) {
 	if c.running {
-		return fmt.Errorf("Command already running. ")
+		return fmt.Errorf("Command already running")
 	}
 
-	cmd := exec.Command("bash", "-c", c.env+task.Run)
-	c.cmd = cmd
+	// Create command directly without shell
+	cmd := exec.Command("make", "build")
+
+	// Set up environment variables
+	if c.env != "" {
+		cmd.Env = append(os.Environ(), strings.Split(strings.TrimSuffix(c.env, ";"), ";")...)
+	}
+
+	// Set up pipes for stdin, stdout, stderr
+	if c.stdin, err = cmd.StdinPipe(); err != nil {
+		return errors.Wrap(err, "failed to create stdin pipe")
+	}
 
 	if c.stdout, err = cmd.StdoutPipe(); err != nil {
-		return
+		return errors.Wrap(err, "failed to create stdout pipe")
 	}
 
 	if c.stderr, err = cmd.StderrPipe(); err != nil {
-		return
+		return errors.Wrap(err, "failed to create stderr pipe")
 	}
 
-	if c.stdin, err = cmd.StdinPipe(); err != nil {
-		return
-	}
+	// Set working directory to current directory
+	cmd.Dir = "."
 
-	if err = c.cmd.Start(); err != nil {
+	// Start the command
+	if err = cmd.Start(); err != nil {
 		return ErrTask{task, err.Error()}
 	}
 
+	// Handle input if provided
+	if task.Input != nil {
+		if _, err = io.Copy(c.stdin, task.Input); err != nil {
+			return errors.Wrap(err, "copying input failed")
+		}
+		if err = c.stdin.Close(); err != nil {
+			return errors.Wrap(err, "closing input failed")
+		}
+	}
+
+	c.cmd = cmd
 	c.running = true
-	return
+	return nil
 }
 
-func (c *LocalhostClient) Wait() (err error) {
+func (c *LocalhostClient) Wait() error {
 	if !c.running {
-		return fmt.Errorf("Trying to wait on stopped command. ")
+		return fmt.Errorf("Trying to wait on stopped command")
 	}
-	err = c.cmd.Wait()
+	err := c.cmd.Wait()
 	c.running = false
-	return
+	return err
 }
 
 func (c *LocalhostClient) Close() error {

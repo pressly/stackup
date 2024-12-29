@@ -148,56 +148,55 @@ func (c *SSHClient) getPrivateKey(file string) (*ssh.Signer, error) {
 }
 
 // Run runs the task.Run command remotely on c.host.
-func (c *SSHClient) Run(task *Task) error {
+func (c *SSHClient) Run(task *Task) (err error) {
 	if c.running {
 		return errors.New("Session already running")
 	}
-	if c.sessOpened {
-		return errors.New("Session already connected")
-	}
-
-	sess, err := c.conn.NewSession()
-	if err != nil {
+	if err = c.openSession(); err != nil {
 		return err
 	}
 
-	c.remoteStdin, err = sess.StdinPipe()
-	if err != nil {
-		return err
-	}
-
-	c.remoteStdout, err = sess.StdoutPipe()
-	if err != nil {
-		return err
-	}
-
-	c.remoteStderr, err = sess.StderrPipe()
-	if err != nil {
-		return err
-	}
-
+	// Handle interactive sessions
 	if task.TTY {
-		// Set up terminal modes
 		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,     // disable echoing
-			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4k baud
-			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4k baud
+			ssh.ECHO:          1,
+			ssh.TTY_OP_ISPEED: 14400,
+			ssh.TTY_OP_OSPEED: 14400,
 		}
-		// Request pseudo terminal
-		if err = sess.RequestPty("xterm", 80, 40, modes); err != nil {
-			return ErrTask{task, fmt.Sprintf("request for pseudo terminal failed: %s", err)}
+
+		if err = c.sess.RequestPty("xterm", 40, 80, modes); err != nil {
+			return errors.Wrap(err, "request for pseudo terminal failed")
 		}
 	}
 
-	// Start the remote command.
-	if err = sess.Start(c.env + task.Run); err != nil {
-		return ErrTask{task, err.Error()}
+	if c.remoteStdin, err = c.sess.StdinPipe(); err != nil {
+		return err
+	}
+	if c.remoteStdout, err = c.sess.StdoutPipe(); err != nil {
+		return err
+	}
+	if c.remoteStderr, err = c.sess.StderrPipe(); err != nil {
+		return err
 	}
 
-	c.sess = sess
-	c.sessOpened = true
+	if task.Input != nil {
+		if err = c.sess.Start(task.Run); err != nil {
+			return ErrTask{task, err.Error()}
+		}
+		if _, err = io.Copy(c.remoteStdin, task.Input); err != nil {
+			return errors.Wrap(err, "copying input failed")
+		}
+		if err = c.remoteStdin.Close(); err != nil {
+			return errors.Wrap(err, "closing input failed")
+		}
+	} else {
+		if err = c.sess.Start(c.env + task.Run); err != nil {
+			return ErrTask{task, err.Error()}
+		}
+	}
+
 	c.running = true
-	return nil
+	return
 }
 
 // Wait waits until the remote command finishes and exits.
@@ -376,4 +375,19 @@ func initAuthMethod() {
 		}
 		signers = append(signers, signer)
 	}
+}
+
+func (c *SSHClient) openSession() error {
+	if c.sessOpened {
+		return errors.New("Session already connected")
+	}
+
+	sess, err := c.conn.NewSession()
+	if err != nil {
+		return err
+	}
+
+	c.sess = sess
+	c.sessOpened = true
+	return nil
 }

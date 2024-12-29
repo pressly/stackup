@@ -3,12 +3,13 @@ package sup
 import (
 	"bytes"
 	"fmt"
-	"github.com/pkg/errors"
-	"gopkg.in/yaml.v2"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/pkg/errors"
+	"gopkg.in/yaml.v2"
 )
 
 // Supfile represents the Stack Up configuration YAML file.
@@ -275,7 +276,7 @@ func NewSupfile(data []byte) (*Supfile, error) {
 		return nil, err
 	}
 
-	// API backward compatibility. Will be deprecated in v1.0.
+	// API backward compatibility
 	switch conf.Version {
 	case "":
 		conf.Version = "0.1"
@@ -286,16 +287,8 @@ func NewSupfile(data []byte) (*Supfile, error) {
 			if cmd.RunOnce {
 				return nil, ErrMustUpdate{"command.run_once is not supported in Supfile v" + conf.Version}
 			}
-		}
-		fallthrough
-
-	case "0.2":
-		for _, cmd := range conf.Commands.cmds {
 			if cmd.Once {
 				return nil, ErrMustUpdate{"command.once is not supported in Supfile v" + conf.Version}
-			}
-			if cmd.Local != "" {
-				return nil, ErrMustUpdate{"command.local is not supported in Supfile v" + conf.Version}
 			}
 			if cmd.Serial != 0 {
 				return nil, ErrMustUpdate{"command.serial is not supported in Supfile v" + conf.Version}
@@ -308,7 +301,7 @@ func NewSupfile(data []byte) (*Supfile, error) {
 		}
 		fallthrough
 
-	case "0.3":
+	case "0.2":
 		var warning string
 		for key, cmd := range conf.Commands.cmds {
 			if cmd.RunOnce {
@@ -320,10 +313,10 @@ func NewSupfile(data []byte) (*Supfile, error) {
 		if warning != "" {
 			_, _ = fmt.Fprintf(os.Stderr, warning)
 		}
-
 		fallthrough
 
-	case "0.4", "0.5":
+	case "0.3", "0.4", "0.5":
+		// All good
 
 	default:
 		return nil, ErrUnsupportedSupfileVersion{"unsupported Supfile version " + conf.Version}
