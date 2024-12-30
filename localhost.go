@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"syscall"
 
 	"github.com/pkg/errors"
 )
@@ -37,15 +38,40 @@ func (c *LocalhostClient) Run(task *Task) (err error) {
 		return fmt.Errorf("Command already running")
 	}
 
-	// Create command directly without shell
-	cmd := exec.Command("make", "build")
+	// Parse the command and arguments
+	cmdArgs := strings.Fields(task.Run)
+	if len(cmdArgs) == 0 {
+		return fmt.Errorf("No command specified")
+	}
+
+	// For interactive commands, use syscall.Exec
+	if task.TTY {
+		binary, err := exec.LookPath(cmdArgs[0])
+		if err != nil {
+			return ErrTask{task, err.Error()}
+		}
+
+		env := os.Environ()
+		if c.env != "" {
+			env = append(env, strings.Split(strings.TrimSuffix(c.env, ";"), ";")...)
+		}
+
+		err = syscall.Exec(binary, cmdArgs, env)
+		if err != nil {
+			return ErrTask{task, err.Error()}
+		}
+		return nil
+	}
+
+	// Create command with proper arguments for non-interactive commands
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 
 	// Set up environment variables
 	if c.env != "" {
 		cmd.Env = append(os.Environ(), strings.Split(strings.TrimSuffix(c.env, ";"), ";")...)
 	}
 
-	// Set up pipes for stdin, stdout, stderr
+	// Set up pipes for non-interactive commands
 	if c.stdin, err = cmd.StdinPipe(); err != nil {
 		return errors.Wrap(err, "failed to create stdin pipe")
 	}
@@ -57,9 +83,6 @@ func (c *LocalhostClient) Run(task *Task) (err error) {
 	if c.stderr, err = cmd.StderrPipe(); err != nil {
 		return errors.Wrap(err, "failed to create stderr pipe")
 	}
-
-	// Set working directory to current directory
-	cmd.Dir = "."
 
 	// Start the command
 	if err = cmd.Start(); err != nil {
@@ -95,14 +118,29 @@ func (c *LocalhostClient) Close() error {
 }
 
 func (c *LocalhostClient) Stdin() io.WriteCloser {
+	if c.cmd != nil && c.cmd.Stdin != nil {
+		if writer, ok := c.cmd.Stdin.(io.WriteCloser); ok {
+			return writer
+		}
+	}
 	return c.stdin
 }
 
 func (c *LocalhostClient) Stderr() io.Reader {
+	if c.cmd != nil && c.cmd.Stderr != nil {
+		if reader, ok := c.cmd.Stderr.(io.Reader); ok {
+			return reader
+		}
+	}
 	return c.stderr
 }
 
 func (c *LocalhostClient) Stdout() io.Reader {
+	if c.cmd != nil && c.cmd.Stdout != nil {
+		if reader, ok := c.cmd.Stdout.(io.Reader); ok {
+			return reader
+		}
+	}
 	return c.stdout
 }
 

@@ -3,3 +3,7 @@ bin/
 *.sw?
 
 .vscode/
+
+/target
+**/*.rs.bk
+Cargo.lock

@@ -1,7 +1,17 @@
+---
+version: 0.4
+
 networks:
     dev:
         hosts:
             - alex@bigbox
+            - alex@100.106.66.7
+    staging:
+        hosts:
+            - alex@100.106.66.7
+    prod:
+        hosts:
+          - alex@api.thepattern.digital
 commands:
     bash:
         desc: Interactive Bash on all hosts
