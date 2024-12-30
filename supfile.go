@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-
 	"gopkg.in/yaml.v2"
 )
 
@@ -22,16 +21,27 @@ type Supfile struct {
 	Version  string   `yaml:"version"`
 }
 
+/*func (s *Supfile) getPrivateKey(file string) (signer ssh.Signer, err error) {
+	var data []byte
+
+	if strings.HasSuffix(file, ".pub") {
+		return // Skip public keys.
+	}
+
+	if data, err = ioutil.ReadFile(file); err != nil {
+		return
+	}
+
+	signer, err = ssh.ParsePrivateKey(data)
+	return
+}*/
+
 // Network is group of hosts with extra custom env vars.
 type Network struct {
 	Env       EnvList  `yaml:"env"`
 	Inventory string   `yaml:"inventory"`
 	Hosts     []string `yaml:"hosts"`
-	Bastion   string   `yaml:"bastion"` // Jump host for the environment
-
-	// Should these live on Hosts too? We'd have to change []string to struct, even in Supfile.
-	User         string // `yaml:"user"`
-	IdentityFile string // `yaml:"identity_file"`
+	Bastion   string   `yaml:"bastion"` // Jump to host for the environment
 }
 
 // Networks is a list of user-defined networks
@@ -87,16 +97,14 @@ type Commands struct {
 	cmds  map[string]Command
 }
 
-func (c *Commands) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	err := unmarshal(&c.cmds)
-	if err != nil {
-		return err
+func (c *Commands) UnmarshalYAML(unmarshal func(interface{}) error) (err error) {
+	if err = unmarshal(&c.cmds); err != nil {
+		return
 	}
 
 	var items yaml.MapSlice
-	err = unmarshal(&items)
-	if err != nil {
-		return err
+	if err = unmarshal(&items); err != nil {
+		return
 	}
 
 	c.Names = make([]string, len(items))
@@ -104,7 +112,7 @@ func (c *Commands) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		c.Names[i] = item.Key.(string)
 	}
 
-	return nil
+	return
 }
 
 func (c *Commands) Get(name string) (Command, bool) {
@@ -118,16 +126,14 @@ type Targets struct {
 	targets map[string][]string
 }
 
-func (t *Targets) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	err := unmarshal(&t.targets)
-	if err != nil {
+func (t *Targets) UnmarshalYAML(unmarshal func(interface{}) error) (err error) {
+	if err = unmarshal(&t.targets); err != nil {
 		return err
 	}
 
 	var items yaml.MapSlice
-	err = unmarshal(&items)
-	if err != nil {
-		return err
+	if err = unmarshal(&items); err != nil {
+		return
 	}
 
 	t.Names = make([]string, len(items))
@@ -135,7 +141,7 @@ func (t *Targets) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		t.Names[i] = item.Key.(string)
 	}
 
-	return nil
+	return
 }
 
 func (t *Targets) Get(name string) ([]string, bool) {
@@ -179,7 +185,7 @@ func (e EnvList) Slice() []string {
 }
 
 func (e *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	items := []yaml.MapItem{}
+	var items []yaml.MapItem
 
 	err := unmarshal(&items)
 	if err != nil {
@@ -255,7 +261,7 @@ type ErrUnsupportedSupfileVersion struct {
 }
 
 func (e ErrMustUpdate) Error() string {
-	return fmt.Sprintf("%v\n\nPlease update sup by `go get -u github.com/pressly/sup/cmd/sup`", e.Msg)
+	return fmt.Sprintf("%v\n\nPlease update sup by `go get -u github.com/NovikovRoman/sup/cmd/sup`", e.Msg)
 }
 
 func (e ErrUnsupportedSupfileVersion) Error() string {
@@ -270,7 +276,7 @@ func NewSupfile(data []byte) (*Supfile, error) {
 		return nil, err
 	}
 
-	// API backward compatibility. Will be deprecated in v1.0.
+	// API backward compatibility
 	switch conf.Version {
 	case "":
 		conf.Version = "0.1"
@@ -281,16 +287,8 @@ func NewSupfile(data []byte) (*Supfile, error) {
 			if cmd.RunOnce {
 				return nil, ErrMustUpdate{"command.run_once is not supported in Supfile v" + conf.Version}
 			}
-		}
-		fallthrough
-
-	case "0.2":
-		for _, cmd := range conf.Commands.cmds {
 			if cmd.Once {
 				return nil, ErrMustUpdate{"command.once is not supported in Supfile v" + conf.Version}
-			}
-			if cmd.Local != "" {
-				return nil, ErrMustUpdate{"command.local is not supported in Supfile v" + conf.Version}
 			}
 			if cmd.Serial != 0 {
 				return nil, ErrMustUpdate{"command.serial is not supported in Supfile v" + conf.Version}
@@ -303,7 +301,7 @@ func NewSupfile(data []byte) (*Supfile, error) {
 		}
 		fallthrough
 
-	case "0.3":
+	case "0.2":
 		var warning string
 		for key, cmd := range conf.Commands.cmds {
 			if cmd.RunOnce {
@@ -313,12 +311,12 @@ func NewSupfile(data []byte) (*Supfile, error) {
 			}
 		}
 		if warning != "" {
-			fmt.Fprintf(os.Stderr, warning)
+			_, _ = fmt.Fprintf(os.Stderr, warning)
 		}
-
 		fallthrough
 
-	case "0.4", "0.5":
+	case "0.3", "0.4", "0.5":
+		// All good
 
 	default:
 		return nil, ErrUnsupportedSupfileVersion{"unsupported Supfile version " + conf.Version}
@@ -329,29 +327,32 @@ func NewSupfile(data []byte) (*Supfile, error) {
 
 // ParseInventory runs the inventory command, if provided, and appends
 // the command's output lines to the manually defined list of hosts.
-func (n Network) ParseInventory() ([]string, error) {
+func (n Network) ParseInventory() (hosts []string, err error) {
+	var (
+		host   string
+		output []byte
+	)
 	if n.Inventory == "" {
-		return nil, nil
+		return
 	}
 
 	cmd := exec.Command("/bin/sh", "-c", n.Inventory)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, n.Env.Slice()...)
 	cmd.Stderr = os.Stderr
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
+
+	if output, err = cmd.Output(); err != nil {
+		return
 	}
 
-	var hosts []string
 	buf := bytes.NewBuffer(output)
 	for {
-		host, err := buf.ReadString('\n')
-		if err != nil {
+		if host, err = buf.ReadString('\n'); err != nil {
 			if err == io.EOF {
+				err = nil
 				break
 			}
-			return nil, err
+			return
 		}
 
 		host = strings.TrimSpace(host)
@@ -362,5 +363,6 @@ func (n Network) ParseInventory() ([]string, error) {
 
 		hosts = append(hosts, host)
 	}
-	return hosts, nil
+
+	return
 }

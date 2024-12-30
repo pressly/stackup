@@ -20,12 +20,12 @@ func RemoteTarCommand(dir string) string {
 }
 
 func LocalTarCmdArgs(path, exclude string) []string {
-	args := []string{}
+	var args []string
 
 	// Added pattens to exclude from tar compress
 	excludes := strings.Split(exclude, ",")
-	for _, exclude := range excludes {
-		trimmed := strings.TrimSpace(exclude)
+	for _, exc := range excludes {
+		trimmed := strings.TrimSpace(exc)
 		if trimmed != "" {
 			args = append(args, `--exclude=`+trimmed)
 		}
@@ -37,17 +37,16 @@ func LocalTarCmdArgs(path, exclude string) []string {
 
 // NewTarStreamReader creates a tar stream reader from a local path.
 // TODO: Refactor. Use "archive/tar" instead.
-func NewTarStreamReader(cwd, path, exclude string) (io.Reader, error) {
+func NewTarStreamReader(cwd, path, exclude string) (stdout io.Reader, err error) {
 	cmd := exec.Command("tar", LocalTarCmdArgs(path, exclude)...)
 	cmd.Dir = cwd
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, errors.Wrap(err, "tar: stdout pipe failed")
+
+	if stdout, err = cmd.StdoutPipe(); err != nil {
+		err = errors.Wrap(err, "tar: stdout pipe failed")
+
+	} else if err = cmd.Start(); err != nil {
+		err = errors.Wrap(err, "tar: starting cmd failed")
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, errors.Wrap(err, "tar: starting cmd failed")
-	}
-
-	return stdout, nil
+	return
 }

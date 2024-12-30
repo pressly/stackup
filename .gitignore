@@ -1,2 +1,9 @@
 bin/
+.idea/
 *.sw?
+
+.vscode/
+
+/target
+**/*.rs.bk
+Cargo.lock

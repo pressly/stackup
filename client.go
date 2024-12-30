@@ -6,7 +6,7 @@ import (
 )
 
 type Client interface {
-	Connect(host string) error
+	Connect() error
 	Run(task *Task) error
 	Wait() error
 	Close() error

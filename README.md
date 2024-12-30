@@ -11,7 +11,7 @@ Stack Up is a simple deployment tool that performs given set of commands on mult
 
 # Installation
 
-    $ go get -u github.com/pressly/sup/cmd/sup
+    $ go get -u github.com/NovikovRoman/sup/cmd/sup
 
 # Usage
 

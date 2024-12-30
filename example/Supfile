@@ -5,7 +5,7 @@ version: 0.4
 env:
   # Environment variables for all commands
   NAME: example
-  REPO: github.com/pressly/sup
+  REPO: github.com/NovikovRoman/sup
   BRANCH: master
   IMAGE: pressly/example
   HOST_PORT: 8000

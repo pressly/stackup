@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strings"
+	"syscall"
 
 	"github.com/pkg/errors"
 )
 
-// Client is a wrapper over the SSH connection/sessions.
+// LocalhostClient is a wrapper over the SSH connection/sessions.
 type LocalhostClient struct {
 	cmd     *exec.Cmd
 	user    string
@@ -21,45 +23,83 @@ type LocalhostClient struct {
 	env     string //export FOO="bar"; export BAR="baz";
 }
 
-func (c *LocalhostClient) Connect(_ string) error {
-	u, err := user.Current()
-	if err != nil {
-		return err
+func (c *LocalhostClient) Connect() (err error) {
+	var u *user.User
+	if u, err = user.Current(); err != nil {
+		return
 	}
 
 	c.user = u.Username
-	return nil
+	return
 }
 
-func (c *LocalhostClient) Run(task *Task) error {
-	var err error
-
+func (c *LocalhostClient) Run(task *Task) (err error) {
 	if c.running {
 		return fmt.Errorf("Command already running")
 	}
 
-	cmd := exec.Command("bash", "-c", c.env+task.Run)
-	c.cmd = cmd
-
-	c.stdout, err = cmd.StdoutPipe()
-	if err != nil {
-		return err
+	// Parse the command and arguments
+	cmdArgs := strings.Fields(task.Run)
+	if len(cmdArgs) == 0 {
+		return fmt.Errorf("No command specified")
 	}
 
-	c.stderr, err = cmd.StderrPipe()
-	if err != nil {
-		return err
+	// For interactive commands, use syscall.Exec
+	if task.TTY {
+		binary, err := exec.LookPath(cmdArgs[0])
+		if err != nil {
+			return ErrTask{task, err.Error()}
+		}
+
+		env := os.Environ()
+		if c.env != "" {
+			env = append(env, strings.Split(strings.TrimSuffix(c.env, ";"), ";")...)
+		}
+
+		err = syscall.Exec(binary, cmdArgs, env)
+		if err != nil {
+			return ErrTask{task, err.Error()}
+		}
+		return nil
 	}
 
-	c.stdin, err = cmd.StdinPipe()
-	if err != nil {
-		return err
+	// Create command with proper arguments for non-interactive commands
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+
+	// Set up environment variables
+	if c.env != "" {
+		cmd.Env = append(os.Environ(), strings.Split(strings.TrimSuffix(c.env, ";"), ";")...)
 	}
 
-	if err := c.cmd.Start(); err != nil {
+	// Set up pipes for non-interactive commands
+	if c.stdin, err = cmd.StdinPipe(); err != nil {
+		return errors.Wrap(err, "failed to create stdin pipe")
+	}
+
+	if c.stdout, err = cmd.StdoutPipe(); err != nil {
+		return errors.Wrap(err, "failed to create stdout pipe")
+	}
+
+	if c.stderr, err = cmd.StderrPipe(); err != nil {
+		return errors.Wrap(err, "failed to create stderr pipe")
+	}
+
+	// Start the command
+	if err = cmd.Start(); err != nil {
 		return ErrTask{task, err.Error()}
 	}
 
+	// Handle input if provided
+	if task.Input != nil {
+		if _, err = io.Copy(c.stdin, task.Input); err != nil {
+			return errors.Wrap(err, "copying input failed")
+		}
+		if err = c.stdin.Close(); err != nil {
+			return errors.Wrap(err, "closing input failed")
+		}
+	}
+
+	c.cmd = cmd
 	c.running = true
 	return nil
 }
@@ -78,14 +118,29 @@ func (c *LocalhostClient) Close() error {
 }
 
 func (c *LocalhostClient) Stdin() io.WriteCloser {
+	if c.cmd != nil && c.cmd.Stdin != nil {
+		if writer, ok := c.cmd.Stdin.(io.WriteCloser); ok {
+			return writer
+		}
+	}
 	return c.stdin
 }
 
 func (c *LocalhostClient) Stderr() io.Reader {
+	if c.cmd != nil && c.cmd.Stderr != nil {
+		if reader, ok := c.cmd.Stderr.(io.Reader); ok {
+			return reader
+		}
+	}
 	return c.stderr
 }
 
 func (c *LocalhostClient) Stdout() io.Reader {
+	if c.cmd != nil && c.cmd.Stdout != nil {
+		if reader, ok := c.cmd.Stdout.(io.Reader); ok {
+			return reader
+		}
+	}
 	return c.stdout
 }
 
